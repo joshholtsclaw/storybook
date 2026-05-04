@@ -1448,6 +1448,7 @@ async function loadCurrentViewToCanvas() {
 }
 
 function redrawDisplay() {
+  _redrawPending = false;
   displayCtx.globalCompositeOperation = 'source-over';
   displayCtx.globalAlpha = 1;
   displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
@@ -1463,6 +1464,12 @@ function redrawDisplay() {
     displayCtx.globalAlpha = 1;
     displayCtx.globalCompositeOperation = 'source-over';
   }
+}
+let _redrawPending = false;
+function scheduleRedraw() {
+  if (_redrawPending) return;
+  _redrawPending = true;
+  requestAnimationFrame(redrawDisplay);
 }
 
 let saveTimer = null;
@@ -1539,18 +1546,18 @@ function taperFactor(i, total) {
 /* --- Pencil: textured stamps along path --- */
 function paintTexturedDot(ctx, pt, brushW, color) {
   ctx.fillStyle = color;
-  // A few jittered sub-stamps so even a tap looks textured
   const stamps = Math.max(2, Math.floor(brushW / 3));
+  ctx.beginPath();
   for (let i = 0; i < stamps; i++) {
     const angle = Math.random() * Math.PI * 2;
     const dist  = Math.random() * brushW * 0.35;
     const x = pt.x + Math.cos(angle) * dist;
     const y = pt.y + Math.sin(angle) * dist;
     const r = (brushW / 4) * (0.5 + Math.random() * 0.7);
-    ctx.beginPath();
+    ctx.moveTo(x + r, y);
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
   }
+  ctx.fill();
 }
 function paintTexturedSegment(ctx, a, b, wA, wB, color) {
   ctx.fillStyle = color;
@@ -1560,23 +1567,22 @@ function paintTexturedSegment(ctx, a, b, wA, wB, color) {
   const ux = dx / dist, uy = dy / dist;
   const px = -uy, py = ux;
   const avgW = (wA + wB) / 2;
-  // Spacing: small fraction of brush width — denser for visible line
   const spacing = Math.max(0.7, avgW / 6);
   const stamps = Math.max(1, Math.ceil(dist / spacing));
+  ctx.beginPath();
   for (let i = 0; i < stamps; i++) {
     const t = (i + 0.5) / stamps;
     const cx = a.x + dx * t;
     const cy = a.y + dy * t;
     const w  = wA + (wB - wA) * t;
-    // Random perpendicular jitter for grain
     const jit = (Math.random() - 0.5) * w * 0.45;
     const x = cx + px * jit;
     const y = cy + py * jit;
     const r = (w / 4) * (0.55 + Math.random() * 0.75);
-    ctx.beginPath();
+    ctx.moveTo(x + r, y);
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
   }
+  ctx.fill();
 }
 
 /* --- Eraser: clean tapered line, no grain --- */
@@ -1661,7 +1667,7 @@ displayCanvas.addEventListener('pointerdown', e => {
   const base     = baseWidthFor(tool);
   const w        = pressureWidth(base, p.p) * 0.6;  // start small, will grow as stroke develops
   paintDot(strokeCtx, p, w, color, textured);
-  redrawDisplay();
+  scheduleRedraw();
 });
 
 displayCanvas.addEventListener('pointermove', e => {
@@ -1683,7 +1689,7 @@ displayCanvas.addEventListener('pointermove', e => {
     const wB = pressureWidth(base, pt.p) * (0.25 + 0.75 * tIn);
     paintSegment(strokeCtx, a, pt, wA, wB, color, textured);
   }
-  redrawDisplay();
+  scheduleRedraw();
 });
 
 async function endStroke() {
