@@ -323,6 +323,39 @@
     width: 22px; text-align: center;
     flex-shrink: 0;
   }
+  .size-num {
+    min-width: 26px; text-align: center;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    flex-shrink: 0;
+    padding: 0 2px;
+  }
+  .size-presets {
+    display: flex; gap: 3px;
+    flex-shrink: 0;
+  }
+  .size-preset {
+    min-width: 26px; height: 26px;
+    padding: 0 6px;
+    border-radius: 13px;
+    background: var(--panel-2);
+    color: var(--ink-dim);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+    user-select: none;
+  }
+  .size-preset:hover { background: var(--panel); color: var(--ink); }
+  .size-preset.active { background: var(--ink); color: var(--bg); }
+  .size-preset.flash { animation: presetFlash .35s ease; }
+  @keyframes presetFlash {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.4); background: var(--accent, var(--ink)); color: var(--bg); }
+    100% { transform: scale(1); }
+  }
 
   /* Project menu (top-right of draw view) */
   .top-right {
@@ -931,7 +964,9 @@
     <div class="slider-cluster">
       <div class="slider-label">Size</div>
       <div class="readout"><div class="dot" id="size-dot"></div></div>
-      <input type="range" min="1" max="120" value="3" class="slider" id="brush-size">
+      <input type="range" min="1" max="120" value="8" class="slider" id="brush-size">
+      <div class="size-num" id="size-num">3</div>
+      <div class="size-presets" id="size-presets"></div>
     </div>
 
     <div class="divider"></div>
@@ -1124,7 +1159,7 @@ const state = {
   setupSize: 'square',
   setupCount: 32,
   tool: 'pencil',
-  brushSize: 3,
+  brushSize: 8,
   greyIdx: 0,
   opacity: 1.0,
   isDrawing: false,
@@ -2244,11 +2279,92 @@ document.getElementById('tool-lasso' ).onclick = () => setTool('lasso');
 
 const sizeSlider = document.getElementById('brush-size');
 const sizeDot    = document.getElementById('size-dot');
+const sizeNum = document.getElementById('size-num');
 function updateSizeReadout() {
   const d = Math.max(2, Math.min(18, state.brushSize));
   sizeDot.style.width = d + 'px'; sizeDot.style.height = d + 'px';
+  if (sizeNum) sizeNum.textContent = String(state.brushSize);
+  renderSizePresets();
 }
 sizeSlider.oninput = () => { state.brushSize = +sizeSlider.value; updateSizeReadout(); };
+
+/* ----- Size presets — tap to apply, long-press (or right-click) to save current ----- */
+let sizePresets;
+const PRESETS_VERSION = 3;
+const DEFAULT_PRESETS = [8, 12, 40];
+try {
+  const savedVersion = +(localStorage.getItem('sizePresetsVersion') || '1');
+  if (savedVersion >= PRESETS_VERSION) {
+    sizePresets = JSON.parse(localStorage.getItem('sizePresets') || 'null') || DEFAULT_PRESETS.slice();
+  } else {
+    sizePresets = DEFAULT_PRESETS.slice();
+    localStorage.setItem('sizePresets', JSON.stringify(sizePresets));
+    localStorage.setItem('sizePresetsVersion', String(PRESETS_VERSION));
+  }
+} catch (_) { sizePresets = DEFAULT_PRESETS.slice(); }
+
+function saveSizePresets() {
+  try { localStorage.setItem('sizePresets', JSON.stringify(sizePresets)); } catch (_) {}
+}
+
+function renderSizePresets() {
+  const wrap = document.getElementById('size-presets');
+  if (!wrap) return;
+  // Avoid full re-render on every input — only when set has changed.
+  const sig = sizePresets.join(',') + '|' + state.brushSize;
+  if (wrap.dataset.sig === sig) return;
+  wrap.dataset.sig = sig;
+  wrap.innerHTML = '';
+  sizePresets.forEach((size, idx) => {
+    const b = document.createElement('button');
+    b.className = 'size-preset' + (state.brushSize === size ? ' active' : '');
+    b.textContent = String(size);
+    let pressTimer = null;
+    let pressed = false;
+    const cancelPress = () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    };
+    b.addEventListener('pointerdown', e => {
+      pressed = true;
+      pressTimer = setTimeout(() => {
+        // Long-press: save current brush size into this preset slot.
+        sizePresets[idx] = state.brushSize;
+        saveSizePresets();
+        b.classList.add('flash');
+        setTimeout(() => b.classList.remove('flash'), 350);
+        if (typeof toast === 'function') toast(`Preset ${idx + 1} → ${state.brushSize}`);
+        wrap.dataset.sig = '';      // force re-render so labels update
+        renderSizePresets();
+        pressTimer = null;
+        pressed = false;            // suppress the tap-apply that would follow
+      }, 550);
+    });
+    b.addEventListener('pointerup', () => {
+      if (pressTimer) { cancelPress(); }
+      if (!pressed) return;
+      pressed = false;
+      // Tap: apply the preset's size.
+      state.brushSize = sizePresets[idx];
+      sizeSlider.value = sizePresets[idx];
+      updateSizeReadout();
+    });
+    b.addEventListener('pointerleave', () => { cancelPress(); pressed = false; });
+    b.addEventListener('pointercancel', () => { cancelPress(); pressed = false; });
+    b.addEventListener('contextmenu', e => {
+      // Desktop right-click: also save current size as this preset.
+      e.preventDefault();
+      sizePresets[idx] = state.brushSize;
+      saveSizePresets();
+      b.classList.add('flash');
+      setTimeout(() => b.classList.remove('flash'), 350);
+      if (typeof toast === 'function') toast(`Preset ${idx + 1} → ${state.brushSize}`);
+      wrap.dataset.sig = '';
+      renderSizePresets();
+    });
+    wrap.appendChild(b);
+  });
+}
+
 updateSizeReadout();
 
 const opSlider = document.getElementById('brush-opacity');
