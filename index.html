@@ -409,6 +409,9 @@
     display: flex; flex-direction: column; align-items: center; gap: 8px;
     background: none; text-align: center;
     cursor: default;
+    /* Without this, iPad Safari will hijack a stroke part-way through and
+     * convert it into a scroll/pan. JS handles both drawing and tap-to-open. */
+    touch-action: none;
   }
   .thumb-img { cursor: default; }
   .thumb-img {
@@ -3032,7 +3035,10 @@ function setupThumbCellDrawing(cell, pageSlots) {
 
   cell.addEventListener('pointerdown', e => {
     if (state.tool !== 'pencil' && state.tool !== 'eraser') return;
-    if (e.pointerType === 'touch' && supportsPen()) return;  // finger scrolls
+    if (e.pointerType === 'touch' && supportsPen()) return;  // finger scrolls (when pen has been seen)
+    // Tell the browser we're claiming this gesture — without this iPad Safari
+    // will partway through "promote" the stroke into a scroll and steal events.
+    e.preventDefault();
     startInfo = { x: e.clientX, y: e.clientY, pid: e.pointerId, type: e.pointerType, pressure: e.pressure };
     mode = 'maybe';
     cell.setPointerCapture(e.pointerId);
