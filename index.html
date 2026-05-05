@@ -668,6 +668,98 @@
     .tool-btn { width: 34px; height: 34px; }
     .slider { width: 56px; }
   }
+
+  /* ---------- Outline side panel ---------- */
+  .outline-toggle {
+    position: fixed;
+    right: max(14px, env(safe-area-inset-right));
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px; height: 40px;
+    background: rgba(36,36,36,.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--hairline);
+    border-radius: 50%;
+    display: none; place-items: center;
+    color: var(--ink-dim);
+    z-index: 22;
+    cursor: pointer;
+  }
+  .outline-toggle:hover { color: var(--ink); }
+  .outline-toggle svg { width: 20px; height: 20px; }
+  body.in-book .outline-toggle { display: grid; }
+  body.outline-open .outline-toggle { display: none; }
+
+  .outline-panel {
+    position: fixed;
+    right: 0; top: 0; bottom: 0;
+    width: 340px;
+    background: var(--panel);
+    border-left: 1px solid var(--hairline);
+    display: flex;
+    flex-direction: column;
+    z-index: 25;
+    transform: translateX(100%);
+    transition: transform .2s ease;
+    box-shadow: -4px 0 24px rgba(0,0,0,.3);
+  }
+  body.outline-open .outline-panel { transform: translateX(0); }
+
+  .outline-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .outline-header .label {
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .outline-header button {
+    width: 28px; height: 28px;
+    display: grid; place-items: center;
+    color: var(--ink-dim);
+    border-radius: 50%;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .outline-header button:hover { color: var(--ink); background: var(--panel-2); }
+
+  .outline-textarea {
+    flex: 1;
+    padding: 16px 18px;
+    background: transparent;
+    border: 0;
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+    -webkit-user-select: text; user-select: text;
+  }
+  .outline-textarea::placeholder {
+    color: var(--ink-faint);
+    font-style: italic;
+  }
+
+  /* When the outline is open, push the canvas / toolbar / topbar to the left
+   * so the panel doesn't overlap them. */
+  body.outline-open .canvas-stage   { padding-right: 364px; }
+  body.outline-open .toolbar        { left: calc(50% - 170px); }
+  body.outline-open .topbar         { left: calc(50% - 170px); }
+  body.outline-open .lasso-toolbar  { left: calc(50% - 170px); }
+  body.outline-open .top-right      { right: calc(340px + max(16px, env(safe-area-inset-right))); }
+
+  @media (max-width: 700px) {
+    /* Narrow screens: panel takes most of the width and just overlays. */
+    .outline-panel { width: 90vw; }
+    body.outline-open .canvas-stage   { padding-right: 24px; }
+    body.outline-open .toolbar        { left: 50%; }
+    body.outline-open .topbar         { left: 50%; }
+    body.outline-open .lasso-toolbar  { left: 50%; }
+    body.outline-open .top-right      { right: max(16px, env(safe-area-inset-right)); }
+  }
 </style>
 </head>
 <body>
@@ -856,6 +948,20 @@
   </div>
 
 </div>
+
+<!-- Outline side panel (always rendered, slides in via class) -->
+<button class="outline-toggle" id="outline-toggle" aria-label="Open outline">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 6h14M5 11h14M5 16h10M5 21h6"/></svg>
+</button>
+<aside class="outline-panel" id="outline-panel">
+  <div class="outline-header">
+    <span class="label">Outline</span>
+    <button id="outline-close" aria-label="Close outline">×</button>
+  </div>
+  <textarea class="outline-textarea" id="outline-textarea"
+    placeholder="Outline. Page-by-page beats. Draft lines. Anything you want to keep in view while you draw."
+    spellcheck="false"></textarea>
+</aside>
 
 <!-- Confirm modal -->
 <div class="modal-bg hidden" id="modal-bg">
@@ -1058,6 +1164,8 @@ function showView(name) {
   // Drawing toolbar: visible in draw and thumbs views, hidden elsewhere.
   const tb = document.getElementById('toolbar');
   if (tb) tb.classList.toggle('hidden', !(name === 'draw' || name === 'thumbs'));
+  // 'in-book' controls the outline toggle visibility.
+  document.body.classList.toggle('in-book', name === 'draw' || name === 'thumbs');
   hidePopover();
 }
 
@@ -1178,6 +1286,7 @@ async function openBook(id) {
     document.getElementById('selection-overlay').classList.remove('active');
     lassoSelection = null;
   }
+  loadOutlineFromBook();
   await goDraw();
 }
 
@@ -1238,6 +1347,7 @@ document.getElementById('start-btn').onclick = async () => {
   state.currentBook = book;
   state.currentViewIdx = 0;
   clearUndoStacks();
+  loadOutlineFromBook();
   await goDraw();
 };
 
@@ -2177,6 +2287,35 @@ document.getElementById('back-to-projects').onclick = async () => {
   goProjects();
 };
 document.getElementById('open-thumbs').onclick = goThumbs;
+
+/* ============================================================
+ * Outline side panel — per-book persistent text editor.
+ * ============================================================ */
+function loadOutlineFromBook() {
+  const ta = document.getElementById('outline-textarea');
+  if (!ta) return;
+  ta.value = (state.currentBook && state.currentBook.outline) || '';
+}
+{
+  const ta = document.getElementById('outline-textarea');
+  if (ta) {
+    ta.addEventListener('input', () => {
+      if (!state.currentBook) return;
+      state.currentBook.outline = ta.value;
+      saveCurrentBookSoon();
+    });
+  }
+  document.getElementById('outline-toggle').onclick = () => {
+    document.body.classList.add('outline-open');
+    setTimeout(() => {
+      const t = document.getElementById('outline-textarea');
+      if (t) t.focus();
+    }, 220);
+  };
+  document.getElementById('outline-close').onclick = () => {
+    document.body.classList.remove('outline-open');
+  };
+}
 document.getElementById('open-menu').onclick = (e) => {
   showPopover([
     { label: 'Rename',           icon: ICONS.rename, onClick: () => renameBook(state.currentBook) },
@@ -3418,6 +3557,7 @@ async function exportProjectArchive(book) {
       pageCount: book.pageCount,
       viewIdx: book.viewIdx || 0,
       textBoxes: book.textBoxes || {},
+      outline: book.outline || '',
       createdAt: book.createdAt,
       updatedAt: book.updatedAt,
     },
@@ -3461,6 +3601,7 @@ async function importProjectArchive(file) {
       pageCount: m.pageCount,
       viewIdx: 0,
       textBoxes: m.textBoxes || {},
+      outline: m.outline || '',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
