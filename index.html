@@ -1559,9 +1559,15 @@ function sizePageFrame() {
   const stage = document.getElementById('canvas-stage');
   const frame = document.getElementById('page-frame');
   const dims = currentCanvasDims();
-  // Stage CSS padding: 80 top, 24 sides, 130 bottom.
-  const aw = stage.clientWidth  - 48;
-  const ah = stage.clientHeight - 210;
+  // Read actual computed padding so the page resizes correctly when the
+  // outline panel opens (which sets a much larger right padding via CSS).
+  const cs = getComputedStyle(stage);
+  const padL = parseFloat(cs.paddingLeft)   || 0;
+  const padR = parseFloat(cs.paddingRight)  || 0;
+  const padT = parseFloat(cs.paddingTop)    || 0;
+  const padB = parseFloat(cs.paddingBottom) || 0;
+  const aw = stage.clientWidth  - padL - padR;
+  const ah = stage.clientHeight - padT - padB;
   const ratio = dims.w / dims.h;
   let w = aw, h = w / ratio;
   if (h > ah) { h = ah; w = h * ratio; }
@@ -1594,18 +1600,21 @@ function sizePageFrame() {
   redrawDisplay();
 }
 
+function refitPageAfterLayoutChange() {
+  if (state.view !== 'draw') return;
+  const snap = displayCanvas.toDataURL('image/png');
+  sizePageFrame();
+  const im = new Image();
+  im.onload = () => {
+    mainCtx.drawImage(im, 0, 0);
+    redrawDisplay();
+  };
+  im.src = snap;
+  layoutTextBoxes();
+}
 window.addEventListener('resize', () => {
   if (state.view === 'draw') {
-    // Snapshot composite, resize, restore
-    const snap = displayCanvas.toDataURL('image/png');
-    sizePageFrame();
-    const im = new Image();
-    im.onload = () => {
-      mainCtx.drawImage(im, 0, 0);
-      redrawDisplay();
-    };
-    im.src = snap;
-    layoutTextBoxes();
+    refitPageAfterLayoutChange();
   }
 });
 
@@ -2072,8 +2081,9 @@ function abortInProgressStroke() {
 
 stage.addEventListener('touchstart', e => {
   if (e.touches.length === 1) {
-    if (zoomState.zoom > 1.001) { swipeStart = null; return; } // no swipe when zoomed
-    swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
+    // Single-finger swipe-to-flip removed — palm rest while drawing was
+    // triggering it. Use the prev/next arrows in the topbar instead.
+    swipeStart = null;
     return;
   }
   if (e.touches.length === 2) {
@@ -2128,15 +2138,7 @@ stage.addEventListener('touchend', e => {
     if (zoomState.zoom <= 1.05) resetZoom();
     return;
   }
-  if (!swipeStart) return;
-  const t = e.changedTouches[0];
-  const dx = t.clientX - swipeStart.x;
-  const dy = t.clientY - swipeStart.y;
-  const dt = Date.now() - swipeStart.t;
-  swipeStart = null;
-  if (dt < 600 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-    flipView(dx < 0 ? +1 : -1);
-  }
+  // Swipe-to-flip removed (palm rest false positives). No-op.
 });
 stage.addEventListener('touchcancel', () => {
   pinching = false; pinchState = null; swipeStart = null;
@@ -2440,12 +2442,14 @@ function loadOutlineFromBook() {
   document.getElementById('outline-toggle').onclick = () => {
     document.body.classList.add('outline-open');
     setTimeout(() => {
+      refitPageAfterLayoutChange();
       const t = document.getElementById('outline-textarea');
       if (t) t.focus();
-    }, 220);
+    }, 230);
   };
   document.getElementById('outline-close').onclick = () => {
     document.body.classList.remove('outline-open');
+    setTimeout(refitPageAfterLayoutChange, 230);
   };
 }
 document.getElementById('open-menu').onclick = (e) => {
